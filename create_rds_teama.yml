@@ -1,0 +1,46 @@
+---
+- hosts: localhost
+  gather_facts: no
+  name: Create RDS instances
+
+  tasks:
+  - name: task something
+    # uses the rds module to create a database in aws and waits to store results in {{rds_facts}} for email.
+    # requires aws credentials and a Tower survey
+    rds:
+      command: create
+      instance_name: "{{ survey_db_name }}"
+      db_engine: MySQL
+      size: 20
+      instance_type: db.t2.micro
+      backup_retention: 0
+      vpc_security_groups: <<< your security group name here >>>
+      region: ap-southeast-2
+      username: "{{ survey_username }}"
+      password: "{{ survey_password }}"
+      tags:
+        Environment: development
+        Application: cms
+        Team: TeamA
+      wait: yes
+      wait_timeout: 600
+    register: rds_facts
+  
+  - name: Sending an e-mail
+    # uses the mail module to send a report on the database created.
+    # requires an email server and credentials
+    mail:
+      host: <<< put email server address here >>>
+      port: 587
+      username: "{{ email_username }}"
+      password: "{{ email_password }}"
+      secure: never
+      to: <<< put email address here >>>
+      subject: Ansible-report
+      body:
+      - "System has been successfully provisioned:"
+      - "DB ID {{ rds_facts.instance.id }}"
+      - "DB engine {{ rds_facts.instance.engine }} version {{ rds_facts.instance.engine_version }}"
+      - "DB endpoint {{ rds_facts.instance.endpoint }}:{{ rds_facts.instance.port }}"
+      - "DB username {{ survey_username }}"
+    delegate_to: localhost

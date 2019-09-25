@@ -1,0 +1,89 @@
+---
+- hosts: localhost
+  connection: local
+  vars:
+    azure_rg: ansible-a-rg
+    azure_location: australiacentral
+    azure_dbserver: jketgansibledba
+    azure_storage_account: ansibledbstoragea
+
+  tasks:
+    # create an azure resource group for everything to live in and store results in {{ rg }}
+    # requires azure credentials
+    - name: Create resource group
+      azure_rm_resourcegroup:
+        name: "{{ azure_rg }}"
+        location: "{{ azure_location }}"
+        tags:
+          testing: testing
+          delete: on-exit
+          Team: TeamA
+      register: rg
+    
+    # create the azure sql server "server" for the database to run on and store results in {{ server }}
+    # requires azure credentials and Tower survey
+    - name: Create SQL Server
+      azure_rm_sqlserver:
+        resource_group: "{{azure_rg}}"
+        name: "{{ azure_dbserver }}"
+        location: "{{ azure_location }}"
+        admin_username: "{{ survey_username }}"
+        admin_password: "{{ survey_password }}"
+        tags:
+          testing: testing
+          delete: on-exit
+          Team: TeamA        
+      register: server
+
+    # create the database on the server
+    # requires azure credentials and Tower survey
+    - name: Create sql database
+      azure_rm_sqldatabase:
+        resource_group: "{{azure_rg}}"
+        server_name: "{{ azure_dbserver }}"
+        name: "{{ survey_db_name }}"
+        location: "{{ azure_location }}"
+
+    # create a storage account for the audit data and store results in {{ db }}
+    # requires azure credentials
+    - name: create a storage account
+      azure_rm_storageaccount:
+        resource_group: "{{ azure_rg }}"
+        name: "{{ azure_storage_account }}"
+        type: Standard_LRS
+        tags:
+          testing: testing
+          delete: on-exit
+          Team: TeamA
+      register: db
+
+    # log/auth into azure as we need to run the az cli for some tasks that don't yet have modules
+    # https://docs.microsoft.com/en-us/azure/role-based-access-control/overview
+    # https://docs.microsoft.com/en-us/azure/role-based-access-control/role-assignments-portal
+    # https://docs.microsoft.com/en-us/azure/active-directory/develop/howto-create-service-principal-portal
+    # https://docs.microsoft.com/en-us/azure/virtual-machines/linux/ansible-install-configure#create-azure-credentials
+    # http://atodorov.org/blog/2018/11/16/how-to-authenticate-ansible-with-azure/
+    - name: log
+      shell: az login --service-principal -u "http://ansible" -p <<< put service principal password/certificate here >>> --tenant <<< put tenant ID here >>>
+      register: az
+
+    - name: Create audit
+      shell: az sql db audit-policy update -g {{ azure_rg }} -s {{ azure_dbserver }} -n {{ survey_db_name }} --state Enabled --storage-account {{ azure_storage_account }}
+      register: az
+
+    # uses the mail module to send info to a user about there database and connectivity
+    # requires email credentials
+    - name: Sending an e-mail
+      mail:
+        host: <<< put email server here >>>
+        port: 587
+        username: "{{ email_username }}"
+        password: "{{ email_password }}"
+        secure: never
+        to: <<< put email address here >>>
+        subject: Ansible-report
+        body:
+        - "System has been successfully provisioned:"
+        - "DB connection string:"
+        - "sqlcmd -S tcp:{{ azure_dbserver }}.database.windows.net,1433 -d {{ survey_db_name }} -U {{ survey_username }} -P <password> -N -l 30"
+      delegate_to: localhost

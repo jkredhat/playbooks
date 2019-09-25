@@ -1,0 +1,80 @@
+---
+- hosts: localhost
+  gather_facts: no
+  name: Create RDS SQL server with audit instance
+  vars:
+    aws_db_engine: sqlserver-ee
+    aws_option_group: audit-option-group
+
+  tasks:
+  # copy in an aws config file with credentials so we can call aws cli
+  - name: Copy in aws config file
+    copy:
+      src: ./aws.cfg
+      dest: ./aws.cfg
+    register: output
+
+  # create a directory for the aws config file
+  - name: mkdir ~/.aws
+    shell: mkdir ~/.aws
+    register: output
+
+  # move the aws config file from sync'd SCM to new directory
+  - name: Move config file to ~/.aws
+    shell: cp ./aws.cfg ~/.aws/credentials
+    register: output
+    
+  # use aws cli to create an aws rds option group
+  # https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithOptionGroups.html
+  # https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.SQLServer.Options.Audit.html
+  # https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_SQLServer.html
+  - name: Run aws cli to create option group
+    shell: aws --region ap-southeast-2 rds create-option-group --option-group-name {{ aws_option_group }} --engine-name {{ aws_db_engine }} --major-engine-version 11.00 --option-group-description "audit option group"
+    register: output
+
+  - name: Run aws cli to add option to option group
+    shell: aws --region ap-southeast-2 rds add-option-to-option-group --option-group-name {{ aws_option_group }} --apply-immediately --options "OptionName=SQLSERVER_AUDIT,OptionSettings=[{Name=ENABLE_COMPRESSION,Value=False},{Name=S3_BUCKET_ARN,Value=arn:aws:s3:::<<< your s3 bucket here >>>/team_audits},{Name=IAM_ROLE_ARN,Value=arn:aws:iam::<<< your resource ID here >>>:role/SqlServerRdsAuditRole}]"
+    register: output
+
+  # use the aws rds module to create the database, wait and store output in {{ rds_facts }} for email
+  # requires aws credentials and email credentials and variables from Tower survey
+  - name: create the database
+    rds:
+      command: create
+      license_model: license-included
+      instance_name: "{{ survey_db_name }}"
+      db_engine: "{{ aws_db_engine }}"
+      engine_version: "11.00"
+      option_group: "{{ aws_option_group }}"
+      size: 20
+      instance_type: db.m4.xlarge
+      backup_retention: 0
+      vpc_security_groups: <<< your aws security group name here >>>
+      region: ap-southeast-2
+      username: "{{ survey_username }}"
+      password: "{{ survey_password }}"
+      tags:
+        Environment: development
+        Application: cms
+        Team: TeamA
+      wait: yes
+      wait_timeout: 900
+    register: rds_facts
+
+  # use the mail module to send an email with the created database info
+  - name: Sending an e-mail
+    mail:
+      host: <<< put email server here >>>
+      port: 587
+      username: "{{ email_username }}"
+      password: "{{ email_password }}"
+      secure: never
+      to: <<< put email address here >>>
+      subject: Ansible-report
+      body:
+      - "System has been successfully provisioned:"
+      - "DB ID {{ rds_facts.instance.id }}"
+      - "DB engine {{ rds_facts.instance.engine }} version {{ rds_facts.instance.engine_version }}"
+      - "DB endpoint {{ rds_facts.instance.endpoint }}:{{ rds_facts.instance.port }}"
+      - "DB username {{ survey_username }}"
+    delegate_to: localhost

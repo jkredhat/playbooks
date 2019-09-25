@@ -1,0 +1,150 @@
+---
+- hosts: localhost
+  connection: local
+  vars:
+    azure_rnd: "22"
+    azure_location: australiacentral
+    azure_rg_name: "ansible-mean-rg-{{ azure_rnd }}"
+    azure_vn_name: "ansible-mean-vn-{{ azure_rnd }}"
+    azure_db_name: "ansible-mean-db-{{ azure_rnd }}"
+    azure_vn_address_prefix: "10.74.0.0/16"
+    azure_vn_sn_name: "ansible-mean-sn-{{ azure_rnd }}"
+    azure_vn_sn_address_prefix: "10.74.74.0/24"
+    azure_public_ip_name: "ansible-mean-ip-{{ azure_rnd }}"
+    azure_nsg_name: "ansible-mean-nsg-{{ azure_rnd }}"
+    azure_vnic_name: "ansible-mean-vnic-{{ azure_rnd }}"
+    azure_vm_name: "jkserver-{{ azure_rnd }}"
+    azure_vm_size: Standard_A2_v2
+    azure_vm_image_publisher: RedHat
+    azure_vm_image_offer: RHEL
+    azure_vm_image_sku: 7-RAW
+    azure_vm_image_version: latest
+    azure_vm_admin_name: ec2-user
+    azure_vm_pub_key: "ssh-rsa <<< your public key data here >>>"
+
+  tasks:
+    - name: Create resource group
+      azure_rm_resourcegroup:
+        name: "{{ azure_rg_name }}"
+        location: "{{ azure_location }}"
+        tags:
+          testing: testing
+          delete: on-exit
+          Team: TeamA
+
+    - name: Create virtual network
+      azure_rm_virtualnetwork:
+        resource_group: "{{ azure_rg_name }}"
+        name: "{{ azure_vn_name }}"
+        address_prefixes: "{{ azure_vn_address_prefix }}"
+
+    - name: Create subnet in virtual network
+      azure_rm_subnet:
+        resource_group: "{{ azure_rg_name }}"
+        name: "{{ azure_vn_sn_name }}"
+        address_prefix: "{{ azure_vn_sn_address_prefix }}"
+        virtual_network: "{{ azure_vn_name }}"
+        service_endpoints:
+          - service: Microsoft.AzureCosmosDB
+            locations: "*"
+      register: azure_rm_subnet_reg
+
+    - name: Athenticate with Azue for CLI access
+      shell: az login --service-principal -u "http://ansible" -p "<<< your service principal password/certificate here >>>" --tenant "<<< your tenant ID here >>>"
+
+    - name: Update subnet with service endpoint
+      shell: az network vnet subnet update -g {{ azure_rg_name }} -n {{ azure_vn_sn_name }} --vnet-name {{ azure_vn_name }} --service-endpoints Microsoft.AzureCosmosDB
+
+    - name: Get facts of specific subnet
+      azure_rm_subnet_facts:
+        resource_group: "{{ azure_rg_name }}"
+        virtual_network_name: "{{ azure_vn_name }}"
+        name: "{{ azure_vn_sn_name }}"
+      register: jk_reg
+
+    - name: Create public IP address
+      azure_rm_publicipaddress:
+        resource_group: "{{ azure_rg_name }}"
+        allocation_method: Static
+        name: "{{ azure_public_ip_name }}"
+      register: azure_rm_publicipaddress_reg
+
+    - name: Create network security group
+      azure_rm_securitygroup:
+        resource_group: "{{ azure_rg_name }}"
+        name: "{{ azure_nsg_name }}"
+        rules:
+          - name: SSH
+            protocol: Tcp
+            destination_port_range: 22
+            access: Allow
+            priority: 1001
+            direction: Inbound
+          - name: web
+            protocol: Tcp
+            destination_port_range: 3300
+            access: Allow
+            priority: 1002
+            direction: Inbound
+
+    - name: Create virtual NIC
+      azure_rm_networkinterface:
+        resource_group: "{{ azure_rg_name }}"
+        name: "{{ azure_vnic_name }}"
+        virtual_network: "{{ azure_vn_name }}"
+        subnet: "{{ azure_vn_sn_name }}"
+        public_ip_name: "{{ azure_public_ip_name }}"
+        security_group: "{{ azure_nsg_name }}"
+
+    - name: Create virtual machine
+      azure_rm_virtualmachine:
+        resource_group: "{{ azure_rg_name }}"
+        name: "{{ azure_vm_name }}"
+        virtual_network_name: "{{ azure_vn_name }}"
+        vm_size: "{{ azure_vm_size }}"
+        network_interfaces: "{{ azure_vnic_name }}"
+        os_type: Linux
+        ssh_password_enabled: false
+        image:
+          publisher: "{{ azure_vm_image_publisher }}"
+          offer: "{{ azure_vm_image_offer }}"
+          sku: "{{ azure_vm_image_sku }}"
+          version: "{{ azure_vm_image_version }}"
+        admin_username: "{{ azure_vm_admin_name }}"
+        ssh_public_keys:
+          - path: /home/{{ azure_vm_admin_name }}/.ssh/authorized_keys
+            key_data: "{{ azure_vm_pub_key }}"
+        tags:
+          Team: TeamA
+      register: azure_rm_virtualmachine.reg
+
+    - name: Create Cosmos DB Account
+      azure_rm_cosmosdbaccount:
+        resource_group: "{{ azure_rg_name }}"
+        name: "{{ azure_db_name }}"
+        location: "{{ azure_location }}"
+        kind: mongo_db
+        geo_rep_locations:
+          - name: "{{ azure_location }}"
+            failover_priority: 0
+        database_account_offer_type: Standard
+
+    - name: Update Cosmos DB Account
+      shell: az cosmosdb update --name {{ azure_db_name }} --resource-group {{ azure_rg_name }} --enable-virtual-network true --virtual-network-rules {{ azure_rm_subnet_reg.state.id }}
+      register: az_cosmosdb_update_reg
+
+    - name: Get database connection string
+      azure_rm_cosmosdbaccount_facts:
+        resource_group: "{{ azure_rg_name }}"
+        name: "{{ azure_db_name }}"
+      register: azure_rm_cosmosdbaccount_facts_reg
+
+    - name: Get Cosmos DB Account connection string
+      shell: az cosmosdb list-connection-strings --resource-group {{ azure_rg_name }} --name {{ azure_db_name }} --output json |jq '.connectionStrings[] | select(.description == "Primary MongoDB Connection String") | {connectionString}| .connectionString' | sed "s/?ssl/test?ssl/g"
+      register: az_cosmosdb_list_reg
+
+    - name: set stats to pass on to next playbook in the Tower workflow
+      set_stats:
+        data:
+          azure_db_connection_string:  "{{ az_cosmosdb_list_reg.stdout }}"
+          azure_rm_publicipaddress_url: "{{ azure_rm_publicipaddress_reg.state.ip_address }}"

@@ -1,0 +1,16 @@
+---
+- hosts: localhost
+  gather_facts: no
+  connection: local
+  name: Create a tower schedule
+
+  tasks:
+  # move the tower cli credentials into ~/. so we can run the tower cli
+  - name: Move tower config file to ~/
+    shell: cp tower_cli.cfg ~/.tower_cli.cfg
+  
+  # run tower cli to create a schedule to run an existing Tower template (stop_rds_teama.yml) at a certain date/time
+  # determine the existing template ID in the Tower GUI by clicking on the template and looking at the URL
+  # https://www.nylas.com/blog/calendar-events-rrules/
+  - name: Run tower-cli to create the schedule
+    shell: tower-cli schedule create -n "Stop schedule" --job-template 24 --rrule "DTSTART;TZID=Australia/Sydney:{{ sched_date }}T{{ sched_time }}AEST RRULE:FREQ=daily;INTERVAL=1;COUNT=1"

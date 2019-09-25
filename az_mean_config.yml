@@ -1,0 +1,79 @@
+- name: Configure server
+  hosts: all
+
+  tasks:
+  - name: Download node.js
+    get_url:
+      url: https://rpm.nodesource.com/setup_12.x
+      dest: /tmp
+      mode: '0744'
+
+  - name: Run node.js repository installer
+    shell: /tmp/setup_12.x
+    become: yes
+
+  - name: Install node.js
+    yum:
+      name: nodejs
+      state: present
+    become: yes
+
+  - name: Create directory structure
+    file:
+      path: "{{ item }}"
+      state: directory
+    loop:
+      - '/tmp/Books'
+      - '/tmp/Books/apps'
+      - '/tmp/Books/apps/models'
+      - '/tmp/Books/public'
+
+  - name: Copy server.js
+    copy:
+      src: ./files/server.js
+      dest: /tmp/Books/server.js
+
+  - name: Copy routes.js
+    copy:
+      src: ./files/routes.js
+      dest: /tmp/Books/apps/routes.js
+
+  - name: Copy script.js
+    copy:
+      src: ./files/script.js
+      dest: /tmp/Books/public/script.js
+
+  - name: Copy index.html
+    copy:
+      src: ./files/index.html
+      dest: /tmp/Books/public/index.html
+
+  - name: Template book.js
+    template:
+      src: ./templates/book.j2
+      dest: /tmp/Books/apps/models/book.js
+
+  - name: Install npm components
+    shell: cd /tmp/Books; npm install body-parser express mongoose
+    become: yes
+
+# TODO: get this working and not rely on the shell below
+#  - name: Open firewall port for web
+#    firewalld:
+#      port: 3300/tcp
+#      permanent: yes
+#      state: enabled
+#    become: yes
+
+  - name: Open firewall port for web
+    shell: sudo firewall-cmd --add-port=3300/tcp
+
+  - name: Start the app in the background
+    shell: cd /tmp/Books; nohup node server.js </dev/null >/dev/null 2>&1 &
+    async: 45
+    poll: 0
+
+  - name: Complete
+    debug:
+      msg: "all done. web site at {{ azure_rm_publicipaddress_url }}:3300"
+

@@ -1,0 +1,60 @@
+- name: Base VE config
+  hosts: localhost
+  connection: local
+  gather_facts: False
+
+# This playbook was run on a trial bigip aws instance such as:
+# F5 Networks BIGIP-14.0.0.1-0.0.2 BYOL (Community ami-06fd0738975c26167)
+# https://devcentral.f5.com/s/articles/getting-started-with-big-ip-ve-trial-22469
+
+# this playbook content taken from:
+# https://github.com/codecowboydotio/ansible/blob/master/f5-configure.yml
+
+  vars:
+    bigip_provider:
+      server: <<< put IP address here >>>
+      user: admin
+      password: <<< put password here. TODO use vault >>>
+      server_port: 8443
+      validate_certs: no
+    bigip_pool: web
+    bigip_pool_member: 10.1.20.100
+    bigip_pool_member_port: 80
+    bigip_vip_port: 80
+    bigip_virtual_name: web-vip
+
+  tasks:
+  - name: Create pool
+    bigip_pool:
+      state: present
+      name: "{{ bigip_pool }}"
+      partition: Common
+      lb_method: least-connections-member
+      slow_ramp_time: 120
+      monitors:
+        - http
+      provider: "{{ bigip_provider }}"
+    delegate_to: localhost
+  
+  - name: Add pool member
+    bigip_pool_member:
+      state: present
+      pool: "{{ bigip_pool }}"
+      partition: Common
+      host: "{{ bigip_pool_member }}"
+      port: "{{ bigip_pool_member_port }}"
+      provider: "{{ bigip_provider }}"
+    delegate_to: localhost
+  
+  - name: Add virtual server
+    bigip_virtual_server:
+      state: present
+      partition: Common
+      name: "{{ bigip_virtual_name }}"
+      destination: 10.1.10.100
+      port: "{{ bigip_vip_port }}"
+      pool: "{{ bigip_pool }}"
+      snat: Automap
+      description: Test Virtual Server
+      provider: "{{ bigip_provider }}"
+    delegate_to: localhost

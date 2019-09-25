@@ -1,0 +1,25 @@
+---
+- hosts: localhost
+  gather_facts: no
+  name: Create role and policy assignments
+  vars:
+    role_name: SqlServerRdsAuditRole
+
+  tasks:
+  # uses the iam_role module to create an IAM role in aws
+  - name: Create IAM role 
+    iam_role:
+      name: "{{ role_name }}"
+      assume_role_policy_document: "{{ lookup('file','trust_policy.json') }}"
+      state: present
+    register: iam_role_facts
+
+  # uses the iam_policy module to create and assign a trust policy to a role
+  - name: Create and assign trust policy to role
+    iam_policy:
+      policy_name: SqlServerRdsAuditPolicy
+      iam_type: role
+      iam_name: "{{ role_name }}"
+      policy_document: permission_policy.json
+      state: present
+    register: iam_policy_facts

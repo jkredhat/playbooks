@@ -1,0 +1,23 @@
+---
+- hosts: localhost
+  gather_facts: no
+  connection: local
+  name: Stop RDS instances
+
+  tasks:
+  # gather facts about all current aws rds databases and store in {{ inva }}
+  - name: Gather RDS facts
+    rds_instance_facts:
+      region: ap-southeast-2
+    register: inva
+
+  # use the aws rds module to delete rds databases that have the "Team" tag set to "TeamA"
+  - name: Stop instances
+    rds:
+      command: delete
+      instance_name: "{{ item.db_instance_identifier }}"
+      region: ap-southeast-2
+    loop: "{{ inva.instances }}"
+    when: item.tags.Team is defined and item.tags.Team == "TeamA"
+    loop_control:
+      label: "{{ item.db_instance_identifier }}"
