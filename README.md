@@ -3,7 +3,7 @@ Ansible playbooks
 
 - aws.cfg | AWS credentials
 
-- az_mean_config.yml | Configures and MEAN stack built by az_mean_deploy.yml as part of a Tower workflow
+- az_mean_config.yml | Configures a MEAN stack built by az_mean_deploy.yml as part of a Tower workflow
 
 - az_mean_deploy.yml | Deploys a MEAN stack in azure, to be followed by az_mean_config.yml as part of a Tower workflow
 
@@ -11,9 +11,9 @@ Ansible playbooks
 
 - create_rds_audit.yml | Create an audit enabled SQL server database in aws rds
 
-- create_rds_schedule_teama | Create a Tower schedule to delete aws rds databases at a certain date/time
+- create_rds_schedule_teama.yml | Create a Tower schedule to delete aws rds databases at a certain date/time
 
-- create_rds_teama | Create a simple aws rds database
+- create_rds_teama.yml | Create a simple aws rds database
 
 - f5_day2_config.yml | Maintains a configuration on an existing bigip device
 
